@@ -1,117 +1,1913 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#05080d">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="theme-color"
+    content="#070a12"
+  >
+
+  <meta
+    name="description"
+    content="Data Security - Private file storage and management"
+  >
+
   <title>Data Security</title>
-  <link rel="stylesheet" href="/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+
+  <!-- Supabase -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
+    defer
+  ></script>
+
+  <script
+    src="/app.js"
+    defer
+  ></script>
 </head>
+
 <body>
-  <div id="toast" class="toast"></div>
 
-  <section id="authScreen" class="auth-screen">
-    <div class="auth-card">
-      <div class="brand-mark">🔐</div>
-      <h1>Data Security</h1>
-      <p class="muted">Private file storage and management</p>
+  <!-- ==================================================
+       APP LOADER
+  =================================================== -->
 
-      <div class="auth-tabs">
-        <button id="loginTab" class="tab active" onclick="showAuth('login')">Sign In</button>
-        <button id="registerTab" class="tab" onclick="showAuth('register')">Register</button>
+  <div
+    id="appLoader"
+    class="app-loader"
+  >
+    <div class="loader-content">
+      <div class="loader-logo">
+        <span>DS</span>
       </div>
 
-      <form id="loginForm" class="auth-form">
-        <label>Username or Email</label>
-        <input id="loginIdentity" autocomplete="username" required placeholder="Enter username or email">
-        <label>Password</label>
-        <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Enter password">
-        <button class="primary" type="submit">Sign In</button>
-        <button class="link-btn" type="button" onclick="showAuth('register')">Create a new account</button>
-      </form>
+      <div class="loader-title">
+        DATA SECURITY
+      </div>
 
-      <form id="registerForm" class="auth-form hidden">
-        <label>Username</label>
-        <input id="regUsername" maxlength="32" autocomplete="username" required placeholder="3–32 characters">
-        <label>Email</label>
-        <input id="regEmail" type="email" autocomplete="email" required placeholder="you@example.com">
-        <label>Password</label>
-        <input id="regPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters">
-        <label>Confirm Password</label>
-        <input id="regConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="Repeat password">
-        <label>Referral Code</label>
-        <input id="regReferral" required placeholder="Enter referral code">
-        <button class="primary" type="submit">Create Account</button>
-        <button class="link-btn" type="button" onclick="showAuth('login')">Already have an account? Sign in</button>
-      </form>
+      <div class="loader-subtitle">
+        Secure file management
+      </div>
 
-      <div class="auth-note">Registration requires a valid referral code.</div>
+      <div class="loader-spinner"></div>
     </div>
+  </div>
+
+
+  <!-- ==================================================
+       AUTH SCREEN
+  =================================================== -->
+
+  <section
+    id="authScreen"
+    class="auth-screen"
+  >
+
+    <div class="auth-background">
+      <div class="auth-orb auth-orb-one"></div>
+      <div class="auth-orb auth-orb-two"></div>
+      <div class="auth-grid"></div>
+    </div>
+
+    <div class="auth-layout">
+
+      <!-- LEFT -->
+      <div class="auth-brand">
+
+        <div class="brand-mark">
+          <span>DS</span>
+        </div>
+
+        <div class="brand-label">
+          PRIVATE STORAGE
+        </div>
+
+        <h1>
+          Your files.
+          <br>
+          <span>Your control.</span>
+        </h1>
+
+        <p>
+          Store, organize, download and securely
+          share your files from one place.
+        </p>
+
+        <div class="auth-features">
+
+          <div class="auth-feature">
+            <div class="feature-icon">
+              🔐
+            </div>
+
+            <div>
+              <strong>
+                Private Storage
+              </strong>
+
+              <span>
+                Your files stay protected.
+              </span>
+            </div>
+          </div>
+
+          <div class="auth-feature">
+            <div class="feature-icon">
+              ☁
+            </div>
+
+            <div>
+              <strong>
+                Any File Type
+              </strong>
+
+              <span>
+                Store documents, images and more.
+              </span>
+            </div>
+          </div>
+
+          <div class="auth-feature">
+            <div class="feature-icon">
+              🔗
+            </div>
+
+            <div>
+              <strong>
+                Secure Sharing
+              </strong>
+
+              <span>
+                Create controlled share links.
+              </span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- RIGHT -->
+      <div class="auth-card">
+
+        <!-- LOGIN -->
+        <div
+          id="loginPanel"
+          class="auth-panel"
+        >
+
+          <div class="auth-card-header">
+
+            <div class="mobile-brand-mark">
+              DS
+            </div>
+
+            <span class="eyebrow">
+              WELCOME BACK
+            </span>
+
+            <h2>
+              Sign in
+            </h2>
+
+            <p>
+              Access your secure file storage.
+            </p>
+
+          </div>
+
+
+          <form
+            id="loginForm"
+            class="auth-form"
+          >
+
+            <div class="form-group">
+
+              <label for="loginIdentity">
+                Email or Username
+              </label>
+
+              <div class="input-wrap">
+
+                <span class="input-icon">
+                  @
+                </span>
+
+                <input
+                  id="loginIdentity"
+                  type="text"
+                  autocomplete="username"
+                  placeholder="Enter email or username"
+                  required
+                >
+
+              </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+              <label for="loginPassword">
+                Password
+              </label>
+
+              <div class="input-wrap">
+
+                <span class="input-icon">
+                  •
+                </span>
+
+                <input
+                  id="loginPassword"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="Enter password"
+                  required
+                >
+
+              </div>
+
+            </div>
+
+
+            <button
+              id="loginButton"
+              type="submit"
+              class="btn btn-primary btn-full"
+            >
+              Sign In
+            </button>
+
+          </form>
+
+
+          <div class="auth-switch">
+
+            <span>
+              Don't have an account?
+            </span>
+
+            <button
+              id="showRegister"
+              type="button"
+              class="text-button"
+            >
+              Create account
+            </button>
+
+          </div>
+
+        </div>
+
+
+        <!-- REGISTER -->
+        <div
+          id="registerPanel"
+          class="auth-panel hidden"
+        >
+
+          <div class="auth-card-header">
+
+            <div class="mobile-brand-mark">
+              DS
+            </div>
+
+            <span class="eyebrow">
+              GET STARTED
+            </span>
+
+            <h2>
+              Create account
+            </h2>
+
+            <p>
+              Create your private storage account.
+            </p>
+
+          </div>
+
+
+          <form
+            id="registerForm"
+            class="auth-form"
+          >
+
+            <div class="form-group">
+
+              <label for="registerUsername">
+                Username
+              </label>
+
+              <div class="input-wrap">
+
+                <span class="input-icon">
+                  @
+                </span>
+
+                <input
+                  id="registerUsername"
+                  type="text"
+                  autocomplete="username"
+                  placeholder="Choose a username"
+                  minlength="3"
+                  maxlength="50"
+                  required
+                >
+
+              </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+              <label for="registerEmail">
+                Email
+              </label>
+
+              <div class="input-wrap">
+
+                <span class="input-icon">
+                  @
+                </span>
+
+                <input
+                  id="registerEmail"
+                  type="email"
+                  autocomplete="email"
+                  placeholder="you@example.com"
+                  required
+                >
+
+              </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+              <label for="registerPassword">
+                Password
+              </label>
+
+              <div class="input-wrap">
+
+                <span class="input-icon">
+                  •
+                </span>
+
+                <input
+                  id="registerPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="At least 6 characters"
+                  minlength="6"
+                  required
+                >
+
+              </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+              <label for="registerReferral">
+                Referral Code
+              </label>
+
+              <div class="input-wrap">
+
+                <span class="input-icon">
+                  #
+                </span>
+
+                <input
+                  id="registerReferral"
+                  type="text"
+                  placeholder="Enter referral code"
+                  autocomplete="off"
+                  required
+                >
+
+              </div>
+
+            </div>
+
+
+            <button
+              id="registerButton"
+              type="submit"
+              class="btn btn-primary btn-full"
+            >
+              Create Account
+            </button>
+
+          </form>
+
+
+          <div class="auth-switch">
+
+            <span>
+              Already have an account?
+            </span>
+
+            <button
+              id="showLogin"
+              type="button"
+              class="text-button"
+            >
+              Sign in
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
   </section>
 
-  <div id="appShell" class="app-shell hidden">
-    <aside id="sidebar" class="sidebar">
-      <div class="brand">
-        <div class="brand-small">🔐</div>
-        <div><b>Data Security</b><span>Secure Storage</span></div>
+
+  <!-- ==================================================
+       MAIN APPLICATION
+  =================================================== -->
+
+  <div
+    id="mainApp"
+    class="main-app hidden"
+  >
+
+    <!-- MOBILE OVERLAY -->
+    <div
+      id="sidebarOverlay"
+      class="sidebar-overlay"
+    ></div>
+
+
+    <!-- ==================================================
+         SIDEBAR
+    =================================================== -->
+
+    <aside
+      id="sidebar"
+      class="sidebar"
+    >
+
+      <div class="sidebar-brand">
+
+        <div class="sidebar-logo">
+          DS
+        </div>
+
+        <div class="sidebar-brand-text">
+
+          <strong>
+            Data Security
+          </strong>
+
+          <span>
+            Private Storage
+          </span>
+
+        </div>
+
       </div>
 
-      <nav>
-        <button class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">⌂ <span>Dashboard</span></button>
-        <button class="nav-item" data-page="files" onclick="navigate('files')">▣ <span>My Files</span></button>
-        <button class="nav-item" data-page="upload" onclick="navigate('upload')">↑ <span>Upload File</span></button>
-        <button class="nav-item" data-page="clients" onclick="navigate('clients')">♙ <span>Clients</span></button>
-        <button class="nav-item" data-page="shared" onclick="navigate('shared')">↗ <span>Shared Files</span></button>
-        <button class="nav-item" data-page="trash" onclick="navigate('trash')">♲ <span>Trash</span></button>
-        <button class="nav-item" data-page="activity" onclick="navigate('activity')">◷ <span>Activity</span></button>
-        <div class="nav-line"></div>
-        <button class="nav-item" data-page="settings" onclick="navigate('settings')">⚙ <span>Settings</span></button>
-        <button id="adminNav" class="nav-item hidden" data-page="admin" onclick="navigate('admin')">♛ <span>Admin Panel</span></button>
+
+      <nav class="sidebar-nav">
+
+        <div class="nav-label">
+          MAIN
+        </div>
+
+        <button
+          type="button"
+          class="nav-item active"
+          data-page="dashboard"
+        >
+          <span class="nav-icon">⌂</span>
+          <span>Dashboard</span>
+        </button>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="files"
+        >
+          <span class="nav-icon">□</span>
+          <span>My Files</span>
+        </button>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="upload"
+        >
+          <span class="nav-icon">↑</span>
+          <span>Upload</span>
+        </button>
+
+
+        <div class="nav-label">
+          ORGANIZE
+        </div>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="clients"
+        >
+          <span class="nav-icon">♙</span>
+          <span>Clients</span>
+        </button>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="shared"
+        >
+          <span class="nav-icon">↗</span>
+          <span>Shared</span>
+        </button>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="trash"
+        >
+          <span class="nav-icon">♲</span>
+          <span>Trash</span>
+        </button>
+
+
+        <div class="nav-label">
+          ACCOUNT
+        </div>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="activity"
+        >
+          <span class="nav-icon">◷</span>
+          <span>Activity</span>
+        </button>
+
+        <button
+          type="button"
+          class="nav-item"
+          data-page="settings"
+        >
+          <span class="nav-icon">⚙</span>
+          <span>Settings</span>
+        </button>
+
+
+        <div
+          id="adminNav"
+          class="admin-nav hidden"
+        >
+
+          <div class="nav-label">
+            ADMIN
+          </div>
+
+          <button
+            type="button"
+            class="nav-item admin-item"
+            data-page="admin"
+          >
+            <span class="nav-icon">◆</span>
+            <span>Administration</span>
+          </button>
+
+        </div>
+
       </nav>
 
-      <button class="logout" onclick="logout()">⇥ <span>Logout</span></button>
+
+      <div class="sidebar-bottom">
+
+        <div class="security-status">
+
+          <div class="status-dot"></div>
+
+          <div>
+            <strong>
+              Secure Connection
+            </strong>
+
+            <span>
+              Protected
+            </span>
+          </div>
+
+        </div>
+
+
+        <button
+          id="logoutButton"
+          type="button"
+          class="logout-button"
+        >
+          <span>↪</span>
+          Sign Out
+        </button>
+
+      </div>
+
     </aside>
 
-    <main class="main">
+
+    <!-- ==================================================
+         CONTENT
+    =================================================== -->
+
+    <main class="content-area">
+
+      <!-- TOPBAR -->
       <header class="topbar">
-        <div class="top-left">
-          <button class="mobile-menu" onclick="toggleSidebar()">☰</button>
-          <div>
-            <h2 id="pageTitle">Dashboard</h2>
-            <small id="pageSubtitle">Your private storage</small>
+
+        <div class="topbar-left">
+
+          <button
+            id="mobileMenuButton"
+            type="button"
+            class="mobile-menu-button"
+          >
+            ☰
+          </button>
+
+          <div class="page-heading">
+
+            <h1 id="pageTitle">
+              Dashboard
+            </h1>
+
+            <p id="pageSubtitle">
+              Overview of your secure files
+            </p>
+
           </div>
+
         </div>
-        <div class="user-chip">
-          <div>
-            <b id="topUsername">User</b>
-            <small id="topRole">User</small>
+
+
+        <div class="topbar-right">
+
+          <button
+            id="topUploadButton"
+            type="button"
+            class="btn btn-primary top-upload-button"
+          >
+            <span>＋</span>
+            Upload
+          </button>
+
+
+          <div
+            id="userMenu"
+            class="user-menu"
+          >
+
+            <div
+              id="userAvatarText"
+              class="user-avatar"
+            >
+              U
+            </div>
+
+            <div class="user-menu-text">
+
+              <strong id="topUsername">
+                User
+              </strong>
+
+              <span id="topEmail">
+                user@example.com
+              </span>
+
+            </div>
+
           </div>
-          <div class="avatar" id="topAvatar">U</div>
+
         </div>
+
       </header>
 
-      <div class="content">
-        <section id="page-dashboard" class="page"></section>
-        <section id="page-files" class="page hidden"></section>
-        <section id="page-upload" class="page hidden"></section>
-        <section id="page-clients" class="page hidden"></section>
-        <section id="page-shared" class="page hidden"></section>
-        <section id="page-trash" class="page hidden"></section>
-        <section id="page-activity" class="page hidden"></section>
-        <section id="page-settings" class="page hidden"></section>
-        <section id="page-admin" class="page hidden"></section>
+
+      <!-- PAGE CONTENT -->
+      <div class="page-content">
+
+
+        <!-- ==================================================
+             DASHBOARD
+        =================================================== -->
+
+        <section
+          id="page-dashboard"
+          class="app-page"
+        >
+
+          <div class="welcome-banner">
+
+            <div>
+
+              <span class="eyebrow">
+                YOUR SECURE SPACE
+              </span>
+
+              <h2>
+                Welcome back,
+                <span id="welcomeUsername">
+                  User
+                </span>
+              </h2>
+
+              <p>
+                Keep your important files organized
+                and protected.
+              </p>
+
+            </div>
+
+            <div class="welcome-symbol">
+              🔐
+            </div>
+
+          </div>
+
+
+          <div class="stats-grid">
+
+            <div class="stat-card">
+
+              <div class="stat-icon blue">
+                □
+              </div>
+
+              <div>
+                <span>
+                  Total Files
+                </span>
+
+                <strong id="statFiles">
+                  0
+                </strong>
+              </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+              <div class="stat-icon purple">
+                ◈
+              </div>
+
+              <div>
+                <span>
+                  Storage Used
+                </span>
+
+                <strong id="statStorage">
+                  0 B
+                </strong>
+              </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+              <div class="stat-icon green">
+                ♙
+              </div>
+
+              <div>
+                <span>
+                  Clients
+                </span>
+
+                <strong id="statClients">
+                  0
+                </strong>
+              </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+              <div class="stat-icon orange">
+                ↗
+              </div>
+
+              <div>
+                <span>
+                  Active Shares
+                </span>
+
+                <strong id="statShared">
+                  0
+                </strong>
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <div class="section-header">
+
+            <div>
+              <h2>
+                Recent Files
+              </h2>
+
+              <p>
+                Your latest uploaded files
+              </p>
+            </div>
+
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-page="files"
+            >
+              View all →
+            </button>
+
+          </div>
+
+
+          <div
+            id="recentFiles"
+            class="file-list"
+          ></div>
+
+        </section>
+
+
+        <!-- ==================================================
+             FILES
+        =================================================== -->
+
+        <section
+          id="page-files"
+          class="app-page hidden"
+        >
+
+          <div class="toolbar">
+
+            <div class="search-box">
+
+              <span>
+                ⌕
+              </span>
+
+              <input
+                id="fileSearch"
+                type="search"
+                placeholder="Search files..."
+              >
+
+            </div>
+
+
+            <select
+              id="fileSort"
+              class="select-control"
+            >
+              <option value="newest">
+                Newest
+              </option>
+
+              <option value="oldest">
+                Oldest
+              </option>
+
+              <option value="name">
+                Name
+              </option>
+
+              <option value="largest">
+                Largest
+              </option>
+            </select>
+
+          </div>
+
+
+          <div
+            id="filesContainer"
+            class="file-list"
+          ></div>
+
+        </section>
+
+
+        <!-- ==================================================
+             UPLOAD
+        =================================================== -->
+
+        <section
+          id="page-upload"
+          class="app-page hidden"
+        >
+
+          <div class="upload-layout">
+
+            <div class="upload-main">
+
+              <div class="section-header">
+                <div>
+                  <h2>
+                    Upload a File
+                  </h2>
+
+                  <p>
+                    Add any file to your secure storage.
+                  </p>
+                </div>
+              </div>
+
+
+              <div
+                id="dropZone"
+                class="drop-zone"
+              >
+
+                <div class="drop-icon">
+                  ↑
+                </div>
+
+                <h3>
+                  Drop your file here
+                </h3>
+
+                <p>
+                  or choose a file from your device
+                </p>
+
+                <button
+                  id="chooseFileButton"
+                  type="button"
+                  class="btn btn-primary"
+                >
+                  Choose File
+                </button>
+
+                <input
+                  id="fileInput"
+                  type="file"
+                  hidden
+                >
+
+                <small id="maxFileSizeText">
+                  Maximum file size: 100 MB
+                </small>
+
+              </div>
+
+
+              <div
+                id="selectedFileBox"
+                class="selected-file-box hidden"
+              >
+
+                <div class="selected-file-icon">
+                  📄
+                </div>
+
+                <div class="selected-file-info">
+
+                  <strong id="selectedFileName">
+                    File
+                  </strong>
+
+                  <span id="selectedFileSize">
+                    0 B
+                  </span>
+
+                </div>
+
+                <button
+                  id="removeSelectedFile"
+                  type="button"
+                  class="icon-btn danger"
+                >
+                  ×
+                </button>
+
+              </div>
+
+
+              <div
+                id="uploadProgressBox"
+                class="upload-progress-box hidden"
+              >
+
+                <div class="progress-header">
+
+                  <span id="uploadProgressText">
+                    Uploading...
+                  </span>
+
+                  <span>
+                    <span class="progress-percent">
+                      —
+                    </span>
+                  </span>
+
+                </div>
+
+                <div class="progress-track">
+
+                  <div
+                    id="uploadProgressBar"
+                    class="progress-bar"
+                  ></div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+            <aside class="upload-side">
+
+              <div class="panel-card">
+
+                <div class="panel-card-header">
+
+                  <div>
+                    <span class="eyebrow">
+                      FILE DETAILS
+                    </span>
+
+                    <h3>
+                      Organize your file
+                    </h3>
+                  </div>
+
+                </div>
+
+
+                <div class="form-group">
+
+                  <label for="uploadDescription">
+                    Description
+                  </label>
+
+                  <textarea
+                    id="uploadDescription"
+                    rows="5"
+                    placeholder="Add a short description..."
+                  ></textarea>
+
+                </div>
+
+
+                <div class="form-group">
+
+                  <label for="uploadClient">
+                    Client
+                  </label>
+
+                  <select
+                    id="uploadClient"
+                  >
+                    <option value="">
+                      No client
+                    </option>
+                  </select>
+
+                </div>
+
+
+                <button
+                  id="uploadSubmitButton"
+                  type="button"
+                  class="btn btn-primary btn-full"
+                >
+                  Upload Securely
+                </button>
+
+              </div>
+
+
+              <div class="info-card">
+
+                <div class="info-card-icon">
+                  🔒
+                </div>
+
+                <div>
+                  <strong>
+                    Private by default
+                  </strong>
+
+                  <p>
+                    Uploaded files are stored in
+                    private storage and require
+                    authorization to access.
+                  </p>
+                </div>
+
+              </div>
+
+            </aside>
+
+          </div>
+
+        </section>
+
+
+        <!-- ==================================================
+             CLIENTS
+        =================================================== -->
+
+        <section
+          id="page-clients"
+          class="app-page hidden"
+        >
+
+          <div class="section-header">
+
+            <div>
+              <h2>
+                Clients
+              </h2>
+
+              <p>
+                Organize your files by client.
+              </p>
+            </div>
+
+            <button
+              id="addClientButton"
+              type="button"
+              class="btn btn-primary"
+            >
+              ＋ Add Client
+            </button>
+
+          </div>
+
+
+          <div
+            id="clientsContainer"
+            class="clients-grid"
+          ></div>
+
+        </section>
+
+
+        <!-- ==================================================
+             SHARED
+        =================================================== -->
+
+        <section
+          id="page-shared"
+          class="app-page hidden"
+        >
+
+          <div class="section-header">
+
+            <div>
+              <h2>
+                Shared Files
+              </h2>
+
+              <p>
+                Manage links you've created.
+              </p>
+            </div>
+
+          </div>
+
+
+          <div
+            id="sharedContainer"
+            class="share-list"
+          ></div>
+
+        </section>
+
+
+        <!-- ==================================================
+             TRASH
+        =================================================== -->
+
+        <section
+          id="page-trash"
+          class="app-page hidden"
+        >
+
+          <div class="section-header">
+
+            <div>
+              <h2>
+                Trash
+              </h2>
+
+              <p>
+                Restore or permanently remove files.
+              </p>
+            </div>
+
+          </div>
+
+
+          <div
+            id="trashContainer"
+            class="file-list"
+          ></div>
+
+        </section>
+
+
+        <!-- ==================================================
+             ACTIVITY
+        =================================================== -->
+
+        <section
+          id="page-activity"
+          class="app-page hidden"
+        >
+
+          <div class="section-header">
+
+            <div>
+              <h2>
+                Activity
+              </h2>
+
+              <p>
+                Recent actions on your account.
+              </p>
+            </div>
+
+          </div>
+
+
+          <div
+            id="activityContainer"
+            class="activity-list"
+          ></div>
+
+        </section>
+
+
+        <!-- ==================================================
+             SETTINGS
+        =================================================== -->
+
+        <section
+          id="page-settings"
+          class="app-page hidden"
+        >
+
+          <div class="settings-layout">
+
+            <div class="panel-card">
+
+              <div class="panel-card-header">
+
+                <div>
+
+                  <span class="eyebrow">
+                    PROFILE
+                  </span>
+
+                  <h2>
+                    Account Settings
+                  </h2>
+
+                </div>
+
+              </div>
+
+
+              <form
+                id="profileForm"
+                class="settings-form"
+              >
+
+                <div class="form-group">
+
+                  <label for="settingsUsername">
+                    Username
+                  </label>
+
+                  <input
+                    id="settingsUsername"
+                    type="text"
+                    maxlength="50"
+                    required
+                  >
+
+                </div>
+
+
+                <div class="form-group">
+
+                  <label for="settingsEmail">
+                    Email
+                  </label>
+
+                  <input
+                    id="settingsEmail"
+                    type="email"
+                    readonly
+                  >
+
+                  <small>
+                    Email is managed by authentication.
+                  </small>
+
+                </div>
+
+
+                <div class="form-group">
+
+                  <label for="settingsAvatar">
+                    Avatar URL
+                  </label>
+
+                  <input
+                    id="settingsAvatar"
+                    type="url"
+                    placeholder="https://..."
+                  >
+
+                </div>
+
+
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                >
+                  Save Changes
+                </button>
+
+              </form>
+
+            </div>
+
+
+            <div class="panel-card account-card">
+
+              <div class="panel-card-header">
+
+                <div>
+
+                  <span class="eyebrow">
+                    ACCOUNT
+                  </span>
+
+                  <h3>
+                    Account Information
+                  </h3>
+
+                </div>
+
+              </div>
+
+
+              <div class="account-detail">
+
+                <span>
+                  Account ID
+                </span>
+
+                <strong
+                  id="accountId"
+                  class="account-id"
+                >
+                  —
+                </strong>
+
+              </div>
+
+
+              <div class="account-detail">
+
+                <span>
+                  Role
+                </span>
+
+                <strong id="accountRole">
+                  user
+                </strong>
+
+              </div>
+
+
+              <div class="account-detail">
+
+                <span>
+                  Created
+                </span>
+
+                <strong id="accountCreated">
+                  —
+                </strong>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </section>
+
+
+        <!-- ==================================================
+             ADMIN
+        =================================================== -->
+
+        <section
+          id="page-admin"
+          class="app-page hidden"
+        >
+
+          <div class="section-header">
+
+            <div>
+              <span class="eyebrow">
+                ADMINISTRATION
+              </span>
+
+              <h2>
+                System Overview
+              </h2>
+
+              <p>
+                Monitor users, files and shared links.
+              </p>
+            </div>
+
+          </div>
+
+
+          <div class="stats-grid admin-stats">
+
+            <div class="stat-card">
+
+              <div class="stat-icon blue">
+                ♙
+              </div>
+
+              <div>
+                <span>
+                  Users
+                </span>
+
+                <strong id="adminUsers">
+                  0
+                </strong>
+              </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+              <div class="stat-icon purple">
+                □
+              </div>
+
+              <div>
+                <span>
+                  Files
+                </span>
+
+                <strong id="adminFiles">
+                  0
+                </strong>
+              </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+              <div class="stat-icon green">
+                ◈
+              </div>
+
+              <div>
+                <span>
+                  Storage
+                </span>
+
+                <strong id="adminStorage">
+                  0 B
+                </strong>
+              </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+              <div class="stat-icon orange">
+                ↗
+              </div>
+
+              <div>
+                <span>
+                  Shares
+                </span>
+
+                <strong id="adminShares">
+                  0
+                </strong>
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <div class="panel-card">
+
+            <div class="panel-card-header">
+
+              <div>
+
+                <span class="eyebrow">
+                  USERS
+                </span>
+
+                <h3>
+                  Registered Users
+                </h3>
+
+              </div>
+
+            </div>
+
+
+            <div
+              id="adminUsersContainer"
+              class="admin-list"
+            ></div>
+
+          </div>
+
+
+          <div
+            class="panel-card admin-files-panel"
+          >
+
+            <div class="panel-card-header">
+
+              <div>
+
+                <span class="eyebrow">
+                  FILES
+                </span>
+
+                <h3>
+                  Stored Files
+                </h3>
+
+              </div>
+
+            </div>
+
+
+            <div
+              id="adminFilesContainer"
+              class="admin-list"
+            ></div>
+
+          </div>
+
+        </section>
+
       </div>
+
     </main>
+
   </div>
 
-  <div id="modal" class="modal hidden">
-    <div class="modal-box">
-      <button class="modal-close" onclick="closeModal()">×</button>
-      <div id="modalContent"></div>
+
+  <!-- ==================================================
+       CLIENT MODAL
+  =================================================== -->
+
+  <div
+    id="clientModal"
+    class="modal"
+  >
+
+    <div class="modal-card">
+
+      <div class="modal-header">
+
+        <div>
+
+          <span class="eyebrow">
+            CLIENT
+          </span>
+
+          <h2 id="clientModalTitle">
+            Add Client
+          </h2>
+
+        </div>
+
+        <button
+          type="button"
+          class="modal-close"
+          data-close-modal="clientModal"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <form
+        id="clientForm"
+        class="modal-form"
+      >
+
+        <input
+          id="clientId"
+          type="hidden"
+        >
+
+
+        <div class="form-group">
+
+          <label for="clientName">
+            Name
+          </label>
+
+          <input
+            id="clientName"
+            type="text"
+            placeholder="Client name"
+            required
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="clientEmail">
+            Email
+          </label>
+
+          <input
+            id="clientEmail"
+            type="email"
+            placeholder="client@example.com"
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="clientPhone">
+            Phone
+          </label>
+
+          <input
+            id="clientPhone"
+            type="text"
+            placeholder="Phone number"
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="clientNotes">
+            Notes
+          </label>
+
+          <textarea
+            id="clientNotes"
+            rows="4"
+            placeholder="Additional notes..."
+          ></textarea>
+
+        </div>
+
+
+        <div class="modal-actions">
+
+          <button
+            type="button"
+            class="btn btn-ghost"
+            data-close-modal="clientModal"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            class="btn btn-primary"
+          >
+            Save Client
+          </button>
+
+        </div>
+
+      </form>
+
     </div>
+
   </div>
 
-  <script src="/app.js"></script>
+
+  <!-- ==================================================
+       SHARE MODAL
+  =================================================== -->
+
+  <div
+    id="shareModal"
+    class="modal"
+  >
+
+    <div class="modal-card">
+
+      <div class="modal-header">
+
+        <div>
+
+          <span class="eyebrow">
+            SECURE SHARE
+          </span>
+
+          <h2>
+            Create Share Link
+          </h2>
+
+        </div>
+
+        <button
+          type="button"
+          class="modal-close"
+          data-close-modal="shareModal"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <input
+        id="shareFileId"
+        type="hidden"
+      >
+
+
+      <div class="form-group">
+
+        <label for="shareExpiration">
+          Expiration
+        </label>
+
+        <input
+          id="shareExpiration"
+          type="datetime-local"
+        >
+
+        <small>
+          Leave empty for no expiration.
+        </small>
+
+      </div>
+
+
+      <button
+        id="generateShareButton"
+        type="button"
+        class="btn btn-primary btn-full"
+      >
+        Generate Share Link
+      </button>
+
+
+      <div
+        id="generatedShareBox"
+        class="generated-share hidden"
+      >
+
+        <label for="generatedShareUrl">
+          Share URL
+        </label>
+
+        <div class="generated-share-row">
+
+          <input
+            id="generatedShareUrl"
+            type="text"
+            readonly
+          >
+
+          <button
+            id="copyShareButton"
+            type="button"
+            class="btn btn-secondary"
+          >
+            Copy
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- ==================================================
+       CONFIRM MODAL
+  =================================================== -->
+
+  <div
+    id="confirmModal"
+    class="modal"
+  >
+
+    <div class="modal-card confirm-card">
+
+      <div class="confirm-icon">
+        !
+      </div>
+
+      <h2 id="confirmTitle">
+        Confirm Action
+      </h2>
+
+      <p id="confirmMessage">
+        Are you sure?
+      </p>
+
+
+      <div class="modal-actions">
+
+        <button
+          type="button"
+          class="btn btn-ghost"
+          data-confirm-cancel
+        >
+          Cancel
+        </button>
+
+        <button
+          id="confirmActionButton"
+          type="button"
+          class="btn btn-danger"
+        >
+          Confirm
+        </button>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- ==================================================
+       TOASTS
+  =================================================== -->
+
+  <div
+    id="toastContainer"
+    class="toast-container"
+  ></div>
+
 </body>
 </html>

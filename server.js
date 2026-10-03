@@ -1,720 +1,1804 @@
-const path = require("path");
-const crypto = require("crypto");
+require("dotenv").config();
+
 const express = require("express");
 const helmet = require("helmet");
-const cors = require("cors");
 const rateLimit = require("express-rate-limit");
+const crypto = require("crypto");
+const path = require("path");
+
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const REFERRAL_CODE = process.env.REFERRAL_CODE || "404";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const STORAGE_BUCKET = process.env.STORAGE_BUCKET || "user-files";
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 100);
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error("Missing required Supabase environment variables.");
+  process.exit(1);
 }
 
-const adminDb = createClient(SUPABASE_URL || "", SERVICE_ROLE_KEY || "", {
-  auth: { autoRefreshToken: false, persistSession: false }
-});
+const supabaseAdmin = createClient(
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
 
-app.set("trust proxy", 1);
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-app.use(cors());
+const supabasePublic = createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* -------------------------------------------------------
+   BASIC APP SETTINGS
+------------------------------------------------------- */
+
+app.disable("x-powered-by");
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: {
+      policy: "cross-origin"
+    },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "https://cdn.jsdelivr.net",
+          "https://*.supabase.co"
+        ],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'"
+        ],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "blob:",
+          "https://*.supabase.co"
+        ],
+        connectSrc: [
+          "'self'",
+          SUPABASE_URL,
+          "https://*.supabase.co"
+        ],
+        fontSrc: [
+          "'self'",
+          "data:"
+        ],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"]
+      }
+    }
+  })
+);
+
 app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: false, limit: "2mb" }));
+app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
-const authLimiter = rateLimit({
+/* -------------------------------------------------------
+   RATE LIMITING
+------------------------------------------------------- */
+
+const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 80,
-  standardHeaders: "draft-8",
+  max: 500,
+  standardHeaders: true,
   legacyHeaders: false
 });
 
-app.use("/api/register", authLimiter);
-app.use("/api/login-identity", authLimiter);
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many authentication attempts. Please try again later."
+  }
+});
 
-function clientFromToken(token) {
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { autoRefreshToken: false, persistSession: false }
-  });
+app.use("/api/", generalLimiter);
+
+/* -------------------------------------------------------
+   HELPERS
+------------------------------------------------------- */
+
+function cleanString(value, maxLength = 500) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim().slice(0, maxLength);
 }
 
-async function requireUser(req, res, next) {
-  try {
-    const header = req.headers.authorization || "";
-    if (!header.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Authentication required." });
-    }
+function validUUID(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || "")
+  );
+}
 
-    const token = header.slice(7);
-    const client = clientFromToken(token);
-    const { data: { user }, error } = await client.auth.getUser();
+function generateToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
 
-    if (error || !user) {
-      return res.status(401).json({ error: "Invalid or expired session." });
-    }
+function safeFileName(name) {
+  return cleanString(name, 255)
+    .replace(/[\/\\]/g, "_")
+    .replace(/\0/g, "")
+    .replace(/\.\./g, "_");
+}
 
-    const { data: profile, error: profileError } = await adminDb
-      .from("profiles")
-      .select("id,username,email,role,disabled")
-      .eq("id", user.id)
-      .maybeSingle();
+function getBearerToken(req) {
+  const header = req.headers.authorization || "";
 
-    if (profileError) {
-      return res.status(500).json({ error: profileError.message });
-    }
-
-    if (!profile) {
-      return res.status(403).json({ error: "Profile not found." });
-    }
-
-    if (profile.disabled) {
-      return res.status(403).json({ error: "This account is disabled." });
-    }
-
-    req.user = user;
-    req.profile = profile;
-    req.client = client;
-    next();
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Authentication failed." });
+  if (!header.startsWith("Bearer ")) {
+    return null;
   }
+
+  return header.slice(7).trim() || null;
+}
+
+async function getUserFromRequest(req) {
+  const token = getBearerToken(req);
+
+  if (!token) {
+    return {
+      user: null,
+      error: "Missing authentication token."
+    };
+  }
+
+  const {
+    data: { user },
+    error
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !user) {
+    return {
+      user: null,
+      error: "Invalid or expired authentication token."
+    };
+  }
+
+  return {
+    user,
+    error: null
+  };
+}
+
+async function requireAuth(req, res, next) {
+  const result = await getUserFromRequest(req);
+
+  if (!result.user) {
+    return res.status(401).json({
+      error: result.error || "Authentication required."
+    });
+  }
+
+  req.user = result.user;
+  next();
+}
+
+async function getProfile(userId) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
 }
 
 async function requireAdmin(req, res, next) {
-  await requireUser(req, res, async () => {
-    if (req.profile.role !== "admin") {
-      return res.status(403).json({ error: "Admin access required." });
+  try {
+    const profile = await getProfile(req.user.id);
+
+    if (!profile || profile.role !== "admin") {
+      return res.status(403).json({
+        error: "Administrator access required."
+      });
     }
+
+    req.profile = profile;
     next();
+  } catch (error) {
+    console.error("Admin check error:", error);
+
+    return res.status(500).json({
+      error: "Unable to verify administrator access."
+    });
+  }
+}
+
+async function logActivity(userId, action, details = {}) {
+  try {
+    await supabaseAdmin
+      .from("activity_logs")
+      .insert({
+        user_id: userId,
+        action,
+        details
+      });
+  } catch (error) {
+    console.error("Activity log error:", error.message);
+  }
+}
+
+async function getFileForUser(fileId, userId) {
+  if (!validUUID(fileId)) {
+    return {
+      file: null,
+      error: "Invalid file ID."
+    };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("files")
+    .select("*")
+    .eq("id", fileId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      file: null,
+      error: error.message
+    };
+  }
+
+  if (!data) {
+    return {
+      file: null,
+      error: "File not found."
+    };
+  }
+
+  return {
+    file: data,
+    error: null
+  };
+}
+
+function publicFileData(file) {
+  if (!file) return null;
+
+  return {
+    id: file.id,
+    name: file.name,
+    mime_type: file.mime_type,
+    size_bytes: file.size_bytes,
+    description: file.description,
+    client_id: file.client_id,
+    is_deleted: file.is_deleted,
+    deleted_at: file.deleted_at,
+    created_at: file.created_at,
+    updated_at: file.updated_at
+  };
+}
+
+/* -------------------------------------------------------
+   HEALTH
+------------------------------------------------------- */
+
+app.get("/api/health", async (req, res) => {
+  res.json({
+    ok: true,
+    service: "data-security",
+    timestamp: new Date().toISOString()
   });
-}
-
-function safeUsername(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function isValidUsername(username) {
-  return /^[a-zA-Z0-9_.-]{3,32}$/.test(username);
-}
-
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function randomToken() {
-  return crypto.randomBytes(32).toString("base64url");
-}
-
-function sha256(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function objectPath(userId, fileId, originalName) {
-  const clean = String(originalName || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
-  return `${userId}/${fileId}-${clean}`;
-}
-
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "Data Security" });
 });
+
+/* -------------------------------------------------------
+   PUBLIC CONFIG
+   NEVER SEND SERVICE ROLE KEY
+------------------------------------------------------- */
 
 app.get("/api/config", (req, res) => {
   res.json({
     supabaseUrl: SUPABASE_URL,
     supabaseAnonKey: SUPABASE_ANON_KEY,
     storageBucket: STORAGE_BUCKET,
-    maxFileSizeMb: MAX_FILE_SIZE_MB
+    maxFileSizeMB: MAX_FILE_SIZE_MB
   });
 });
 
-app.post("/api/check-referral", (req, res) => {
-  res.json({ valid: String(req.body.code || "") === REFERRAL_CODE });
-});
+/* -------------------------------------------------------
+   LOGIN IDENTITY
+   Allows username OR email login.
+------------------------------------------------------- */
 
-app.post("/api/login-identity", async (req, res) => {
+app.post("/api/login-identity", authLimiter, async (req, res) => {
   try {
-    const identity = String(req.body.identity || "").trim().toLowerCase();
-    if (!identity) return res.status(400).json({ error: "Username or email is required." });
+    const identity = cleanString(req.body.identity, 320);
 
-    if (identity.includes("@")) {
-      return res.json({ email: identity });
+    if (!identity) {
+      return res.status(400).json({
+        error: "Email or username is required."
+      });
     }
 
-    const { data, error } = await adminDb
+    if (identity.includes("@")) {
+      return res.json({
+        email: identity.toLowerCase()
+      });
+    }
+
+    const { data: profile, error } = await supabaseAdmin
       .from("profiles")
-      .select("email,disabled")
-      .eq("username", identity)
+      .select("email")
+      .ilike("username", identity)
       .maybeSingle();
 
-    if (error) return res.status(500).json({ error: error.message });
-    if (!data) return res.status(404).json({ error: "Account not found." });
-    if (data.disabled) return res.status(403).json({ error: "This account is disabled." });
+    if (error) {
+      console.error("Identity lookup error:", error);
 
-    res.json({ email: data.email });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Unable to resolve account." });
+      return res.status(500).json({
+        error: "Unable to find account."
+      });
+    }
+
+    if (!profile) {
+      return res.status(404).json({
+        error: "Account not found."
+      });
+    }
+
+    return res.json({
+      email: profile.email
+    });
+  } catch (error) {
+    console.error("Login identity error:", error);
+
+    res.status(500).json({
+      error: "Unable to process login."
+    });
   }
 });
 
-app.post("/api/register", async (req, res) => {
+/* -------------------------------------------------------
+   REGISTER
+------------------------------------------------------- */
+
+app.post("/api/register", authLimiter, async (req, res) => {
   try {
-    const username = safeUsername(req.body.username);
-    const email = String(req.body.email || "").trim().toLowerCase();
+    const username = cleanString(req.body.username, 50);
+    const email = cleanString(req.body.email, 320).toLowerCase();
     const password = String(req.body.password || "");
-    const confirmPassword = String(req.body.confirmPassword || "");
-    const referral = String(req.body.referralCode || "");
+    const referral = cleanString(req.body.referral, 100);
 
-    if (referral !== REFERRAL_CODE) {
-      return res.status(400).json({ error: "Invalid referral code." });
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        error: "Username, email and password are required."
+      });
     }
 
-    if (!isValidUsername(username)) {
-      return res.status(400).json({ error: "Username must be 3-32 characters and use only letters, numbers, _, ., or -." });
+    if (!/^[a-zA-Z0-9_.-]{3,50}$/.test(username)) {
+      return res.status(400).json({
+        error:
+          "Username must be 3-50 characters and contain only letters, numbers, dot, dash or underscore."
+      });
     }
 
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: "Enter a valid email address." });
+    if (password.length < 6) {
+      return res.status(400).json({
+        error: "Password must be at least 6 characters."
+      });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters." });
+    const expectedReferral = process.env.REFERRAL_CODE;
+
+    if (expectedReferral && referral !== expectedReferral) {
+      return res.status(400).json({
+        error: "Invalid referral code."
+      });
     }
 
-    if (password !== confirmPassword) {
-      return res.status(400).json({ error: "Passwords do not match." });
+    const { data: existingUsername, error: usernameError } =
+      await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .ilike("username", username)
+        .maybeSingle();
+
+    if (usernameError) {
+      console.error("Username check error:", usernameError);
+
+      return res.status(500).json({
+        error: "Unable to validate username."
+      });
     }
 
-    const { data: existingUsername, error: usernameError } = await adminDb
-      .from("profiles")
-      .select("id")
-      .eq("username", username)
-      .maybeSingle();
+    if (existingUsername) {
+      return res.status(409).json({
+        error: "Username is already taken."
+      });
+    }
 
-    if (usernameError) return res.status(500).json({ error: usernameError.message });
-    if (existingUsername) return res.status(409).json({ error: "Username is already taken." });
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true
+      });
 
-    const { data: created, error: createError } = await adminDb.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { username }
-    });
+    if (authError) {
+      const message = authError.message || "Unable to create account.";
 
-    if (createError) return res.status(400).json({ error: createError.message });
+      if (
+        message.toLowerCase().includes("already") ||
+        message.toLowerCase().includes("registered")
+      ) {
+        return res.status(409).json({
+          error: "An account with this email already exists."
+        });
+      }
 
-    const { error: profileError } = await adminDb
+      return res.status(400).json({
+        error: message
+      });
+    }
+
+    const user = authData.user;
+
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .insert({
-        id: created.user.id,
+        id: user.id,
         username,
         email,
-        role: "user",
-        disabled: false
+        role: "user"
       });
 
     if (profileError) {
-      await adminDb.auth.admin.deleteUser(created.user.id);
-      return res.status(500).json({ error: "Could not create user profile." });
+      console.error("Profile creation error:", profileError);
+
+      await supabaseAdmin.auth.admin.deleteUser(user.id);
+
+      return res.status(500).json({
+        error: "Unable to create user profile."
+      });
     }
 
-    await adminDb.from("activity_logs").insert({
-      user_id: created.user.id,
-      action: "account_registered",
-      details: { username }
+    await logActivity(user.id, "account_created", {
+      username,
+      referralUsed: Boolean(referral)
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Account created successfully."
+    });
+  } catch (error) {
+    console.error("Register error:", error);
+
+    res.status(500).json({
+      error: "Registration failed."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   CURRENT USER
+------------------------------------------------------- */
+
+app.get("/api/me", requireAuth, async (req, res) => {
+  try {
+    let profile = await getProfile(req.user.id);
+
+    if (!profile) {
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .insert({
+          id: req.user.id,
+          email: req.user.email,
+          username: req.user.email?.split("@")[0] || "user",
+          role: "user"
+        })
+        .select("*")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      profile = data;
+    }
+
+    res.json({
+      user: {
+        id: req.user.id,
+        email: req.user.email,
+        created_at: req.user.created_at
+      },
+      profile
+    });
+  } catch (error) {
+    console.error("Me error:", error);
+
+    res.status(500).json({
+      error: "Unable to load account."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   FILES - LIST
+------------------------------------------------------- */
+
+app.get("/api/files", requireAuth, async (req, res) => {
+  try {
+    const includeDeleted = req.query.deleted === "true";
+
+    let query = supabaseAdmin
+      .from("files")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", {
+        ascending: false
+      });
+
+    if (!includeDeleted) {
+      query = query.eq("is_deleted", false);
+    } else {
+      query = query.eq("is_deleted", true);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      files: data || []
+    });
+  } catch (error) {
+    console.error("Files list error:", error);
+
+    res.status(500).json({
+      error: "Unable to load files."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   FILE REGISTER
+   Browser uploads directly to Supabase Storage.
+------------------------------------------------------- */
+
+app.post("/api/files/register", requireAuth, async (req, res) => {
+  try {
+    const name = safeFileName(req.body.name);
+    const storagePath = cleanString(req.body.storagePath, 1000);
+    const mimeType = cleanString(req.body.mimeType, 255);
+    const sizeBytes = Number(req.body.sizeBytes || 0);
+    const description = cleanString(req.body.description, 2000);
+    const clientId = cleanString(req.body.clientId, 100);
+
+    if (!name || !storagePath) {
+      return res.status(400).json({
+        error: "File information is incomplete."
+      });
+    }
+
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      return res.status(400).json({
+        error: "Invalid file size."
+      });
+    }
+
+    const maxBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+    if (sizeBytes > maxBytes) {
+      return res.status(400).json({
+        error: `File exceeds the ${MAX_FILE_SIZE_MB} MB limit.`
+      });
+    }
+
+    const expectedPrefix = `${req.user.id}/`;
+
+    if (!storagePath.startsWith(expectedPrefix)) {
+      return res.status(403).json({
+        error: "Invalid storage path."
+      });
+    }
+
+    if (clientId && !validUUID(clientId)) {
+      return res.status(400).json({
+        error: "Invalid client."
+      });
+    }
+
+    if (clientId) {
+      const { data: client } = await supabaseAdmin
+        .from("clients")
+        .select("id")
+        .eq("id", clientId)
+        .eq("user_id", req.user.id)
+        .maybeSingle();
+
+      if (!client) {
+        return res.status(400).json({
+          error: "Selected client does not belong to this account."
+        });
+      }
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("files")
+      .insert({
+        user_id: req.user.id,
+        client_id: clientId || null,
+        name,
+        storage_path: storagePath,
+        mime_type: mimeType || "application/octet-stream",
+        size_bytes: sizeBytes,
+        description,
+        is_deleted: false
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "file_uploaded", {
+      fileId: data.id,
+      fileName: data.name,
+      sizeBytes: data.size_bytes
     });
 
     res.status(201).json({
-      ok: true,
-      message: "Account created. You can now sign in."
+      success: true,
+      file: data
     });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Registration failed." });
+  } catch (error) {
+    console.error("File register error:", error);
+
+    res.status(500).json({
+      error: "Unable to save uploaded file."
+    });
   }
 });
 
-app.get("/api/me", requireUser, async (req, res) => {
-  res.json({ user: req.user, profile: req.profile });
-});
+/* -------------------------------------------------------
+   DOWNLOAD
+------------------------------------------------------- */
 
-app.get("/api/files", requireUser, async (req, res) => {
-  const { data, error } = await adminDb
-    .from("files")
-    .select("*")
-    .eq("owner_id", req.user.id)
-    .eq("is_trashed", false)
-    .order("created_at", { ascending: false });
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ files: data || [] });
-});
-
-app.get("/api/trash", requireUser, async (req, res) => {
-  const { data, error } = await adminDb
-    .from("files")
-    .select("*")
-    .eq("owner_id", req.user.id)
-    .eq("is_trashed", true)
-    .order("deleted_at", { ascending: false });
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ files: data || [] });
-});
-
-app.post("/api/files/register", requireUser, async (req, res) => {
+app.get("/api/files/:id/download", requireAuth, async (req, res) => {
   try {
-    const {
-      id, originalName, description, clientName, category,
-      tags, mimeType, size, sha256: digest
-    } = req.body;
+    const result = await getFileForUser(
+      req.params.id,
+      req.user.id
+    );
 
-    if (!id || !originalName) {
-      return res.status(400).json({ error: "Missing file information." });
+    if (!result.file) {
+      return res.status(404).json({
+        error: result.error || "File not found."
+      });
     }
 
-    const bytes = Number(size);
-    if (!Number.isFinite(bytes) || bytes < 0 || bytes > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      return res.status(400).json({ error: `File exceeds the ${MAX_FILE_SIZE_MB} MB limit.` });
+    const file = result.file;
+
+    if (file.is_deleted) {
+      return res.status(404).json({
+        error: "File is in trash."
+      });
     }
 
-    const filePath = objectPath(req.user.id, id, originalName);
-
-    const { data, error } = await adminDb.from("files").insert({
-      id,
-      owner_id: req.user.id,
-      original_name: originalName,
-      storage_path: filePath,
-      description: String(description || "").slice(0, 2000),
-      client_name: String(clientName || "").slice(0, 120),
-      category: String(category || "Other").slice(0, 60),
-      tags: Array.isArray(tags) ? tags.slice(0, 20) : [],
-      mime_type: String(mimeType || "application/octet-stream").slice(0, 180),
-      size: bytes,
-      sha256: digest || null
-    }).select().single();
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    await adminDb.from("activity_logs").insert({
-      user_id: req.user.id,
-      action: "file_uploaded",
-      details: { file_id: id, name: originalName, size: bytes }
-    });
-
-    res.status(201).json({ file: data });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Could not save file metadata." });
-  }
-});
-
-app.post("/api/files/:id/signed-url", requireUser, async (req, res) => {
-  const { data: file, error } = await adminDb
-    .from("files")
-    .select("*")
-    .eq("id", req.params.id)
-    .eq("owner_id", req.user.id)
-    .eq("is_trashed", false)
-    .maybeSingle();
-
-  if (error) return res.status(500).json({ error: error.message });
-  if (!file) return res.status(404).json({ error: "File not found." });
-
-  const { data, error: urlError } = await adminDb.storage
-    .from(STORAGE_BUCKET)
-    .createSignedUrl(file.storage_path, 300);
-
-  if (urlError) return res.status(400).json({ error: urlError.message });
-
-  await adminDb.from("activity_logs").insert({
-    user_id: req.user.id,
-    action: "file_downloaded",
-    details: { file_id: file.id, name: file.original_name }
-  });
-
-  res.json({ url: data.signedUrl, file });
-});
-
-app.post("/api/files/:id/trash", requireUser, async (req, res) => {
-  const { data: file, error: findError } = await adminDb
-    .from("files")
-    .select("id,original_name")
-    .eq("id", req.params.id)
-    .eq("owner_id", req.user.id)
-    .eq("is_trashed", false)
-    .maybeSingle();
-
-  if (findError) return res.status(500).json({ error: findError.message });
-  if (!file) return res.status(404).json({ error: "File not found." });
-
-  const { error } = await adminDb
-    .from("files")
-    .update({ is_trashed: true, deleted_at: new Date().toISOString() })
-    .eq("id", file.id)
-    .eq("owner_id", req.user.id);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  await adminDb.from("activity_logs").insert({
-    user_id: req.user.id,
-    action: "file_trashed",
-    details: { file_id: file.id, name: file.original_name }
-  });
-
-  res.json({ ok: true });
-});
-
-app.post("/api/files/:id/restore", requireUser, async (req, res) => {
-  const { error } = await adminDb
-    .from("files")
-    .update({ is_trashed: false, deleted_at: null })
-    .eq("id", req.params.id)
-    .eq("owner_id", req.user.id)
-    .eq("is_trashed", true);
-
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ ok: true });
-});
-
-app.delete("/api/files/:id", requireUser, async (req, res) => {
-  const { data: file, error: findError } = await adminDb
-    .from("files")
-    .select("*")
-    .eq("id", req.params.id)
-    .eq("owner_id", req.user.id)
-    .maybeSingle();
-
-  if (findError) return res.status(500).json({ error: findError.message });
-  if (!file) return res.status(404).json({ error: "File not found." });
-
-  const { error: storageError } = await adminDb.storage
-    .from(STORAGE_BUCKET)
-    .remove([file.storage_path]);
-
-  if (storageError) console.warn("Storage deletion warning:", storageError.message);
-
-  const { error } = await adminDb
-    .from("files")
-    .delete()
-    .eq("id", file.id)
-    .eq("owner_id", req.user.id);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  await adminDb.from("activity_logs").insert({
-    user_id: req.user.id,
-    action: "file_deleted",
-    details: { file_id: file.id, name: file.original_name }
-  });
-
-  res.json({ ok: true });
-});
-
-app.get("/api/clients", requireUser, async (req, res) => {
-  const { data, error } = await adminDb
-    .from("clients")
-    .select("*")
-    .eq("owner_id", req.user.id)
-    .order("created_at", { ascending: false });
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ clients: data || [] });
-});
-
-app.post("/api/clients", requireUser, async (req, res) => {
-  const name = String(req.body.name || "").trim().slice(0, 120);
-  const description = String(req.body.description || "").trim().slice(0, 500);
-
-  if (!name) return res.status(400).json({ error: "Client name is required." });
-
-  const { data, error } = await adminDb
-    .from("clients")
-    .insert({ owner_id: req.user.id, name, description })
-    .select()
-    .single();
-
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(201).json({ client: data });
-});
-
-app.get("/api/activity", requireUser, async (req, res) => {
-  const { data, error } = await adminDb
-    .from("activity_logs")
-    .select("*")
-    .eq("user_id", req.user.id)
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ activity: data || [] });
-});
-
-app.post("/api/share", requireUser, async (req, res) => {
-  try {
-    const { fileId, expiresAt, password, downloadLimit } = req.body;
-
-    const { data: file, error: fileError } = await adminDb
-      .from("files")
-      .select("id,owner_id,original_name,is_trashed")
-      .eq("id", fileId)
-      .eq("owner_id", req.user.id)
-      .maybeSingle();
-
-    if (fileError) return res.status(500).json({ error: fileError.message });
-    if (!file || file.is_trashed) return res.status(404).json({ error: "File not found." });
-
-    const token = randomToken();
-    const passwordHash = password ? sha256(String(password)) : null;
-    const limit = downloadLimit ? Math.max(1, Math.min(10000, Number(downloadLimit))) : null;
-
-    const { error } = await adminDb.from("share_links").insert({
-      owner_id: req.user.id,
-      file_id: file.id,
-      token_hash: sha256(token),
-      password_hash: passwordHash,
-      expires_at: expiresAt || null,
-      download_limit: limit,
-      download_count: 0,
-      revoked: false
-    });
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    const origin = process.env.PUBLIC_SITE_URL || `${req.protocol}://${req.get("host")}`;
-    const url = `${origin}/share/${token}`;
-
-    await adminDb.from("activity_logs").insert({
-      user_id: req.user.id,
-      action: "share_created",
-      details: { file_id: file.id, name: file.original_name }
-    });
-
-    res.status(201).json({ url });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Could not create share link." });
-  }
-});
-
-app.get("/api/share/:token", async (req, res) => {
-  try {
-    const hash = sha256(req.params.token);
-
-    const { data: link, error } = await adminDb
-      .from("share_links")
-      .select("id,file_id,owner_id,password_hash,expires_at,download_limit,download_count,revoked")
-      .eq("token_hash", hash)
-      .maybeSingle();
-
-    if (error) return res.status(500).json({ error: "Share lookup failed." });
-    if (!link || link.revoked) return res.status(404).json({ error: "Share link is unavailable." });
-
-    if (link.expires_at && new Date(link.expires_at) <= new Date()) {
-      return res.status(410).json({ error: "Share link has expired." });
-    }
-
-    if (link.download_limit !== null && link.download_count >= link.download_limit) {
-      return res.status(410).json({ error: "Download limit reached." });
-    }
-
-    const supplied = req.headers["x-share-password"];
-    if (link.password_hash && sha256(String(supplied || "")) !== link.password_hash) {
-      return res.status(401).json({ passwordRequired: true, error: "Password required." });
-    }
-
-    const { data: file, error: fileError } = await adminDb
-      .from("files")
-      .select("id,original_name,mime_type,size,storage_path")
-      .eq("id", link.file_id)
-      .eq("owner_id", link.owner_id)
-      .maybeSingle();
-
-    if (fileError || !file) return res.status(404).json({ error: "Shared file not found." });
-
-    const { data: signed, error: signedError } = await adminDb.storage
+    const { data, error } = await supabaseAdmin.storage
       .from(STORAGE_BUCKET)
-      .createSignedUrl(file.storage_path, 300);
+      .createSignedUrl(file.storage_path, 60);
 
-    if (signedError) return res.status(400).json({ error: signedError.message });
+    if (error || !data?.signedUrl) {
+      console.error("Signed URL error:", error);
 
-    await adminDb
-      .from("share_links")
-      .update({ download_count: link.download_count + 1 })
-      .eq("id", link.id);
+      return res.status(500).json({
+        error: "Unable to create download link."
+      });
+    }
+
+    await logActivity(req.user.id, "file_downloaded", {
+      fileId: file.id,
+      fileName: file.name
+    });
 
     res.json({
-      file: {
-        name: file.original_name,
-        mimeType: file.mime_type,
-        size: file.size
-      },
-      url: signed.signedUrl
+      url: data.signedUrl,
+      name: file.name
     });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Unable to open share link." });
+  } catch (error) {
+    console.error("Download error:", error);
+
+    res.status(500).json({
+      error: "Unable to download file."
+    });
   }
 });
 
-app.get("/api/admin/data", requireAdmin, async (req, res) => {
-  const [{ data: users, error: usersError }, { data: files, error: filesError }] = await Promise.all([
-    adminDb.from("profiles").select("id,username,email,role,disabled,created_at").order("created_at", { ascending: false }),
-    adminDb.from("files").select("id,owner_id,original_name,size,is_trashed,created_at")
-  ]);
+/* -------------------------------------------------------
+   TRASH
+------------------------------------------------------- */
 
-  if (usersError || filesError) {
-    return res.status(500).json({ error: usersError?.message || filesError?.message });
+app.post("/api/files/:id/trash", requireAuth, async (req, res) => {
+  try {
+    const result = await getFileForUser(
+      req.params.id,
+      req.user.id
+    );
+
+    if (!result.file) {
+      return res.status(404).json({
+        error: result.error || "File not found."
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("files")
+      .update({
+        is_deleted: true,
+        deleted_at: new Date().toISOString()
+      })
+      .eq("id", result.file.id)
+      .eq("user_id", req.user.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "file_trashed", {
+      fileId: data.id,
+      fileName: data.name
+    });
+
+    res.json({
+      success: true,
+      file: data
+    });
+  } catch (error) {
+    console.error("Trash error:", error);
+
+    res.status(500).json({
+      error: "Unable to move file to trash."
+    });
   }
-
-  const storageByUser = {};
-  for (const file of files || []) {
-    storageByUser[file.owner_id] = (storageByUser[file.owner_id] || 0) + Number(file.size || 0);
-  }
-
-  res.json({ users: users || [], files: files || [], storageByUser });
 });
 
-app.post("/api/admin/user/:id/disable", requireAdmin, async (req, res) => {
-  if (req.params.id === req.user.id) {
-    return res.status(400).json({ error: "You cannot disable your own admin account." });
+/* -------------------------------------------------------
+   RESTORE
+------------------------------------------------------- */
+
+app.post("/api/files/:id/restore", requireAuth, async (req, res) => {
+  try {
+    const result = await getFileForUser(
+      req.params.id,
+      req.user.id
+    );
+
+    if (!result.file) {
+      return res.status(404).json({
+        error: result.error || "File not found."
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("files")
+      .update({
+        is_deleted: false,
+        deleted_at: null
+      })
+      .eq("id", result.file.id)
+      .eq("user_id", req.user.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "file_restored", {
+      fileId: data.id,
+      fileName: data.name
+    });
+
+    res.json({
+      success: true,
+      file: data
+    });
+  } catch (error) {
+    console.error("Restore error:", error);
+
+    res.status(500).json({
+      error: "Unable to restore file."
+    });
   }
+});
 
-  const disabled = Boolean(req.body.disabled);
+/* -------------------------------------------------------
+   PERMANENT DELETE
+------------------------------------------------------- */
 
-  const { error: profileError } = await adminDb
-    .from("profiles")
-    .update({ disabled })
-    .eq("id", req.params.id);
+app.delete("/api/files/:id", requireAuth, async (req, res) => {
+  try {
+    const result = await getFileForUser(
+      req.params.id,
+      req.user.id
+    );
 
-  if (profileError) return res.status(400).json({ error: profileError.message });
+    if (!result.file) {
+      return res.status(404).json({
+        error: result.error || "File not found."
+      });
+    }
 
-  const { error: authError } = await adminDb.auth.admin.updateUserById(
-    req.params.id,
-    { ban_duration: disabled ? "876000h" : "none" }
+    const file = result.file;
+
+    const { error: storageError } = await supabaseAdmin.storage
+      .from(STORAGE_BUCKET)
+      .remove([file.storage_path]);
+
+    if (storageError) {
+      console.error("Storage delete error:", storageError);
+    }
+
+    const { error: dbError } = await supabaseAdmin
+      .from("files")
+      .delete()
+      .eq("id", file.id)
+      .eq("user_id", req.user.id);
+
+    if (dbError) {
+      throw dbError;
+    }
+
+    await supabaseAdmin
+      .from("share_links")
+      .delete()
+      .eq("file_id", file.id);
+
+    await logActivity(req.user.id, "file_deleted", {
+      fileId: file.id,
+      fileName: file.name
+    });
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error("Permanent delete error:", error);
+
+    res.status(500).json({
+      error: "Unable to permanently delete file."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   CLIENTS
+------------------------------------------------------- */
+
+app.get("/api/clients", requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("clients")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", {
+        ascending: false
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      clients: data || []
+    });
+  } catch (error) {
+    console.error("Clients error:", error);
+
+    res.status(500).json({
+      error: "Unable to load clients."
+    });
+  }
+});
+
+app.post("/api/clients", requireAuth, async (req, res) => {
+  try {
+    const name = cleanString(req.body.name, 150);
+    const email = cleanString(req.body.email, 320);
+    const phone = cleanString(req.body.phone, 80);
+    const notes = cleanString(req.body.notes, 2000);
+
+    if (!name) {
+      return res.status(400).json({
+        error: "Client name is required."
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("clients")
+      .insert({
+        user_id: req.user.id,
+        name,
+        email,
+        phone,
+        notes
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "client_created", {
+      clientId: data.id,
+      clientName: data.name
+    });
+
+    res.status(201).json({
+      success: true,
+      client: data
+    });
+  } catch (error) {
+    console.error("Client create error:", error);
+
+    res.status(500).json({
+      error: "Unable to create client."
+    });
+  }
+});
+
+app.put("/api/clients/:id", requireAuth, async (req, res) => {
+  try {
+    if (!validUUID(req.params.id)) {
+      return res.status(400).json({
+        error: "Invalid client ID."
+      });
+    }
+
+    const updates = {
+      name: cleanString(req.body.name, 150),
+      email: cleanString(req.body.email, 320),
+      phone: cleanString(req.body.phone, 80),
+      notes: cleanString(req.body.notes, 2000)
+    };
+
+    if (!updates.name) {
+      return res.status(400).json({
+        error: "Client name is required."
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("clients")
+      .update(updates)
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "client_updated", {
+      clientId: data.id,
+      clientName: data.name
+    });
+
+    res.json({
+      success: true,
+      client: data
+    });
+  } catch (error) {
+    console.error("Client update error:", error);
+
+    res.status(500).json({
+      error: "Unable to update client."
+    });
+  }
+});
+
+app.delete("/api/clients/:id", requireAuth, async (req, res) => {
+  try {
+    if (!validUUID(req.params.id)) {
+      return res.status(400).json({
+        error: "Invalid client ID."
+      });
+    }
+
+    const { data: client } = await supabaseAdmin
+      .from("clients")
+      .select("id,name")
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .maybeSingle();
+
+    if (!client) {
+      return res.status(404).json({
+        error: "Client not found."
+      });
+    }
+
+    const { error } = await supabaseAdmin
+      .from("clients")
+      .delete()
+      .eq("id", client.id)
+      .eq("user_id", req.user.id);
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "client_deleted", {
+      clientId: client.id,
+      clientName: client.name
+    });
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error("Client delete error:", error);
+
+    res.status(500).json({
+      error: "Unable to delete client."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   SHARES
+------------------------------------------------------- */
+
+app.get("/api/shares", requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("share_links")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", {
+        ascending: false
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    const shares = data || [];
+
+    const fileIds = [
+      ...new Set(
+        shares
+          .map((share) => share.file_id)
+          .filter(Boolean)
+      )
+    ];
+
+    let files = [];
+
+    if (fileIds.length) {
+      const result = await supabaseAdmin
+        .from("files")
+        .select("id,name")
+        .in("id", fileIds)
+        .eq("user_id", req.user.id);
+
+      files = result.data || [];
+    }
+
+    const fileMap = new Map(
+      files.map((file) => [file.id, file])
+    );
+
+    res.json({
+      shares: shares.map((share) => ({
+        ...share,
+        file: fileMap.get(share.file_id) || null
+      }))
+    });
+  } catch (error) {
+    console.error("Shares list error:", error);
+
+    res.status(500).json({
+      error: "Unable to load share links."
+    });
+  }
+});
+
+app.post("/api/shares", requireAuth, async (req, res) => {
+  try {
+    const fileId = cleanString(req.body.fileId, 100);
+    const expiration = cleanString(req.body.expiresAt, 100);
+
+    if (!validUUID(fileId)) {
+      return res.status(400).json({
+        error: "Invalid file."
+      });
+    }
+
+    const { file, error: fileError } = await getFileForUser(
+      fileId,
+      req.user.id
+    );
+
+    if (!file) {
+      return res.status(404).json({
+        error: fileError || "File not found."
+      });
+    }
+
+    if (file.is_deleted) {
+      return res.status(400).json({
+        error: "Files in trash cannot be shared."
+      });
+    }
+
+    let expiresAt = null;
+
+    if (expiration) {
+      const parsed = new Date(expiration);
+
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({
+          error: "Invalid expiration date."
+        });
+      }
+
+      if (parsed.getTime() <= Date.now()) {
+        return res.status(400).json({
+          error: "Expiration must be in the future."
+        });
+      }
+
+      expiresAt = parsed.toISOString();
+    }
+
+    const token = generateToken();
+
+    const { data, error } = await supabaseAdmin
+      .from("share_links")
+      .insert({
+        file_id: file.id,
+        user_id: req.user.id,
+        token,
+        expires_at: expiresAt
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "share_created", {
+      shareId: data.id,
+      fileId: file.id,
+      fileName: file.name
+    });
+
+    res.status(201).json({
+      success: true,
+      share: data,
+      url: `/share/${token}`
+    });
+  } catch (error) {
+    console.error("Share create error:", error);
+
+    res.status(500).json({
+      error: "Unable to create share link."
+    });
+  }
+});
+
+app.delete("/api/shares/:id", requireAuth, async (req, res) => {
+  try {
+    if (!validUUID(req.params.id)) {
+      return res.status(400).json({
+        error: "Invalid share ID."
+      });
+    }
+
+    const { data: share } = await supabaseAdmin
+      .from("share_links")
+      .select("*")
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .maybeSingle();
+
+    if (!share) {
+      return res.status(404).json({
+        error: "Share link not found."
+      });
+    }
+
+    const { error } = await supabaseAdmin
+      .from("share_links")
+      .update({
+        revoked_at: new Date().toISOString()
+      })
+      .eq("id", share.id)
+      .eq("user_id", req.user.id);
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "share_revoked", {
+      shareId: share.id,
+      fileId: share.file_id
+    });
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error("Share revoke error:", error);
+
+    res.status(500).json({
+      error: "Unable to revoke share link."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   PUBLIC SHARE
+------------------------------------------------------- */
+
+app.get("/api/public-share/:token", async (req, res) => {
+  try {
+    const token = cleanString(req.params.token, 100);
+
+    if (!token || token.length < 20) {
+      return res.status(404).json({
+        error: "Share link not found."
+      });
+    }
+
+    const { data: share, error: shareError } =
+      await supabaseAdmin
+        .from("share_links")
+        .select("*")
+        .eq("token", token)
+        .maybeSingle();
+
+    if (shareError) {
+      throw shareError;
+    }
+
+    if (!share) {
+      return res.status(404).json({
+        error: "Share link not found."
+      });
+    }
+
+    if (share.revoked_at) {
+      return res.status(410).json({
+        error: "This share link has been revoked."
+      });
+    }
+
+    if (
+      share.expires_at &&
+      new Date(share.expires_at).getTime() <= Date.now()
+    ) {
+      return res.status(410).json({
+        error: "This share link has expired."
+      });
+    }
+
+    const { data: file, error: fileError } =
+      await supabaseAdmin
+        .from("files")
+        .select("*")
+        .eq("id", share.file_id)
+        .maybeSingle();
+
+    if (fileError) {
+      throw fileError;
+    }
+
+    if (!file || file.is_deleted) {
+      return res.status(404).json({
+        error: "Shared file is no longer available."
+      });
+    }
+
+    const { data: signed, error: signedError } =
+      await supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .createSignedUrl(file.storage_path, 300);
+
+    if (signedError || !signed?.signedUrl) {
+      throw signedError || new Error("Unable to create file URL.");
+    }
+
+    res.json({
+      success: true,
+      file: publicFileData(file),
+      downloadUrl: signed.signedUrl,
+      expiresAt: share.expires_at
+    });
+  } catch (error) {
+    console.error("Public share error:", error);
+
+    res.status(500).json({
+      error: "Unable to open shared file."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   ACTIVITY
+------------------------------------------------------- */
+
+app.get("/api/activity", requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(
+      Math.max(Number(req.query.limit || 100), 1),
+      200
+    );
+
+    const { data, error } = await supabaseAdmin
+      .from("activity_logs")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", {
+        ascending: false
+      })
+      .limit(limit);
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      activity: data || []
+    });
+  } catch (error) {
+    console.error("Activity error:", error);
+
+    res.status(500).json({
+      error: "Unable to load activity."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   PROFILE / SETTINGS
+------------------------------------------------------- */
+
+app.put("/api/profile", requireAuth, async (req, res) => {
+  try {
+    const username = cleanString(req.body.username, 50);
+    const avatarUrl = cleanString(req.body.avatarUrl, 1000);
+
+    if (!username) {
+      return res.status(400).json({
+        error: "Username is required."
+      });
+    }
+
+    if (!/^[a-zA-Z0-9_.-]{3,50}$/.test(username)) {
+      return res.status(400).json({
+        error: "Invalid username."
+      });
+    }
+
+    const { data: existing } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("username", username)
+      .neq("id", req.user.id)
+      .maybeSingle();
+
+    if (existing) {
+      return res.status(409).json({
+        error: "Username is already taken."
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        username,
+        avatar_url: avatarUrl || null
+      })
+      .eq("id", req.user.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    await logActivity(req.user.id, "profile_updated", {
+      username
+    });
+
+    res.json({
+      success: true,
+      profile: data
+    });
+  } catch (error) {
+    console.error("Profile update error:", error);
+
+    res.status(500).json({
+      error: "Unable to update profile."
+    });
+  }
+});
+
+/* -------------------------------------------------------
+   ADMIN STATS
+------------------------------------------------------- */
+
+app.get(
+  "/api/admin/stats",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const [
+        usersResult,
+        filesResult,
+        sharesResult
+      ] = await Promise.all([
+        supabaseAdmin
+          .from("profiles")
+          .select("id", {
+            count: "exact",
+            head: true
+          }),
+
+        supabaseAdmin
+          .from("files")
+          .select("id,size_bytes", {
+            count: "exact"
+          })
+          .eq("is_deleted", false),
+
+        supabaseAdmin
+          .from("share_links")
+          .select("id", {
+            count: "exact",
+            head: true
+          })
+          .is("revoked_at", null)
+      ]);
+
+      if (usersResult.error) throw usersResult.error;
+      if (filesResult.error) throw filesResult.error;
+      if (sharesResult.error) throw sharesResult.error;
+
+      const files = filesResult.data || [];
+
+      const totalStorage = files.reduce(
+        (sum, file) =>
+          sum + Number(file.size_bytes || 0),
+        0
+      );
+
+      res.json({
+        users: usersResult.count || 0,
+        files: filesResult.count || 0,
+        storage: totalStorage,
+        shares: sharesResult.count || 0
+      });
+    } catch (error) {
+      console.error("Admin stats error:", error);
+
+      res.status(500).json({
+        error: "Unable to load administrator statistics."
+      });
+    }
+  }
+);
+
+/* -------------------------------------------------------
+   ADMIN USERS
+------------------------------------------------------- */
+
+app.get(
+  "/api/admin/users",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .order("created_at", {
+          ascending: false
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      res.json({
+        users: data || []
+      });
+    } catch (error) {
+      console.error("Admin users error:", error);
+
+      res.status(500).json({
+        error: "Unable to load users."
+      });
+    }
+  }
+);
+
+/* -------------------------------------------------------
+   ADMIN FILES
+------------------------------------------------------- */
+
+app.get(
+  "/api/admin/files",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("files")
+        .select("*")
+        .order("created_at", {
+          ascending: false
+        })
+        .limit(500);
+
+      if (error) {
+        throw error;
+      }
+
+      res.json({
+        files: data || []
+      });
+    } catch (error) {
+      console.error("Admin files error:", error);
+
+      res.status(500).json({
+        error: "Unable to load files."
+      });
+    }
+  }
+);
+
+/* -------------------------------------------------------
+   ADMIN SHARES
+------------------------------------------------------- */
+
+app.get(
+  "/api/admin/shares",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("share_links")
+        .select("*")
+        .order("created_at", {
+          ascending: false
+        })
+        .limit(500);
+
+      if (error) {
+        throw error;
+      }
+
+      res.json({
+        shares: data || []
+      });
+    } catch (error) {
+      console.error("Admin shares error:", error);
+
+      res.status(500).json({
+        error: "Unable to load share links."
+      });
+    }
+  }
+);
+
+/* -------------------------------------------------------
+   OPTIONAL ADMIN BOOTSTRAP
+   Creates the configured admin only when it does not exist.
+   It NEVER resets an existing admin password.
+------------------------------------------------------- */
+
+async function ensureAdminAccount() {
+  const email = cleanString(
+    process.env.ADMIN_EMAIL,
+    320
+  ).toLowerCase();
+
+  const password = String(
+    process.env.ADMIN_PASSWORD || ""
   );
 
-  if (authError) console.warn("Auth ban update warning:", authError.message);
-
-  res.json({ ok: true });
-});
-
-app.delete("/api/admin/user/:id", requireAdmin, async (req, res) => {
-  if (req.params.id === req.user.id) {
-    return res.status(400).json({ error: "You cannot delete your own admin account." });
-  }
-
-  const { data: files } = await adminDb
-    .from("files")
-    .select("storage_path")
-    .eq("owner_id", req.params.id);
-
-  if (files?.length) {
-    await adminDb.storage.from(STORAGE_BUCKET)
-      .remove(files.map(f => f.storage_path));
-  }
-
-  const { error } = await adminDb.auth.admin.deleteUser(req.params.id);
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ ok: true });
-});
-
-app.post("/api/admin/file/:id/delete", requireAdmin, async (req, res) => {
-  const { data: file, error } = await adminDb
-    .from("files")
-    .select("*")
-    .eq("id", req.params.id)
-    .maybeSingle();
-
-  if (error) return res.status(500).json({ error: error.message });
-  if (!file) return res.status(404).json({ error: "File not found." });
-
-  await adminDb.storage.from(STORAGE_BUCKET).remove([file.storage_path]);
-
-  const { error: deleteError } = await adminDb
-    .from("files")
-    .delete()
-    .eq("id", file.id);
-
-  if (deleteError) return res.status(400).json({ error: deleteError.message });
-
-  res.json({ ok: true });
-});
-
-app.post("/api/bootstrap-admin", async (req, res) => {
-  const secret = req.headers["x-bootstrap-secret"];
-  if (!process.env.BOOTSTRAP_SECRET || secret !== process.env.BOOTSTRAP_SECRET) {
-    return res.status(403).json({ error: "Invalid bootstrap secret." });
+  if (!email || !password) {
+    console.log(
+      "ADMIN_EMAIL / ADMIN_PASSWORD not configured. Skipping admin bootstrap."
+    );
+    return;
   }
 
   try {
-    const username = safeUsername(process.env.ADMIN_USERNAME || "admin");
-    const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
-    const password = String(process.env.ADMIN_PASSWORD || "");
+    let targetUser = null;
 
-    if (!email || password.length < 8) {
-      return res.status(500).json({ error: "ADMIN_EMAIL and ADMIN_PASSWORD must be configured." });
+    const perPage = 1000;
+    let page = 1;
+
+    while (!targetUser) {
+      const { data, error } =
+        await supabaseAdmin.auth.admin.listUsers({
+          page,
+          perPage
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const users = data?.users || [];
+
+      targetUser = users.find(
+        (u) =>
+          String(u.email || "").toLowerCase() === email
+      );
+
+      if (
+        targetUser ||
+        users.length < perPage
+      ) {
+        break;
+      }
+
+      page++;
     }
 
-    const { data: existing } = await adminDb
-      .from("profiles")
-      .select("id")
-      .eq("username", username)
-      .maybeSingle();
+    if (!targetUser) {
+      const { data, error } =
+        await supabaseAdmin.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true
+        });
 
-    if (existing) return res.json({ ok: true, message: "Admin already exists." });
+      if (error) {
+        throw error;
+      }
 
-    const { data: created, error: createError } = await adminDb.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { username }
-    });
+      targetUser = data.user;
 
-    if (createError) return res.status(400).json({ error: createError.message });
+      console.log(
+        "Admin account created for configured ADMIN_EMAIL."
+      );
+    }
 
-    const { error: profileError } = await adminDb.from("profiles").insert({
-      id: created.user.id,
-      username,
-      email,
-      role: "admin",
-      disabled: false
-    });
+    const { error: profileError } =
+      await supabaseAdmin
+        .from("profiles")
+        .upsert(
+          {
+            id: targetUser.id,
+            email,
+            username:
+              email.split("@")[0] || "admin",
+            role: "admin"
+          },
+          {
+            onConflict: "id"
+          }
+        );
 
     if (profileError) {
-      await adminDb.auth.admin.deleteUser(created.user.id);
-      return res.status(500).json({ error: profileError.message });
+      throw profileError;
     }
 
-    res.status(201).json({ ok: true, message: "Admin created." });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Admin bootstrap failed." });
+    console.log("Admin profile verified.");
+  } catch (error) {
+    console.error(
+      "Admin bootstrap failed:",
+      error.message
+    );
   }
+}
+
+/* -------------------------------------------------------
+   STATIC FILES
+------------------------------------------------------- */
+
+const publicDir = path.join(
+  __dirname,
+  "public"
+);
+
+app.use(
+  express.static(publicDir, {
+    index: false,
+    maxAge: "1h"
+  })
+);
+
+/* -------------------------------------------------------
+   SPA FALLBACK
+   IMPORTANT:
+   Do NOT use app.get("*") with Express 5.
+------------------------------------------------------- */
+
+app.use((req, res, next) => {
+  if (
+    req.method !== "GET" ||
+    req.path.startsWith("/api/")
+  ) {
+    return next();
+  }
+
+  if (req.path.startsWith("/share/")) {
+    return res.sendFile(
+      path.join(publicDir, "index.html")
+    );
+  }
+
+  return res.sendFile(
+    path.join(publicDir, "index.html")
+  );
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+/* -------------------------------------------------------
+   404
+------------------------------------------------------- */
 
-app.get("*splat", (req, res) => {
+app.use((req, res) => {
   if (req.path.startsWith("/api/")) {
-    return res.status(404).json({ error: "API route not found." });
+    return res.status(404).json({
+      error: "API endpoint not found."
+    });
   }
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+
+  res.status(404).send("Page not found.");
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Data Security running on port ${PORT}`);
+/* -------------------------------------------------------
+   ERROR HANDLER
+------------------------------------------------------- */
+
+app.use((error, req, res, next) => {
+  console.error("Unhandled server error:", error);
+
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  res.status(500).json({
+    error: "Internal server error."
+  });
+});
+
+/* -------------------------------------------------------
+   START
+------------------------------------------------------- */
+
+app.listen(PORT, async () => {
+  console.log(
+    `Data Security server running on port ${PORT}`
+  );
+
+  await ensureAdminAccount();
 });
