@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#05080d">
+  <title>Data Security</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <section id="authScreen" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand-mark">🔐</div>
+      <h1>Data Security</h1>
+      <p class="muted">Private file storage and management</p>
+
+      <div class="auth-tabs">
+        <button id="loginTab" class="tab active" onclick="showAuth('login')">Sign In</button>
+        <button id="registerTab" class="tab" onclick="showAuth('register')">Register</button>
+      </div>
+
+      <form id="loginForm" class="auth-form">
+        <label>Username or Email</label>
+        <input id="loginIdentity" autocomplete="username" required placeholder="Enter username or email">
+        <label>Password</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Enter password">
+        <button class="primary" type="submit">Sign In</button>
+        <button class="link-btn" type="button" onclick="showAuth('register')">Create a new account</button>
+      </form>
+
+      <form id="registerForm" class="auth-form hidden">
+        <label>Username</label>
+        <input id="regUsername" maxlength="32" autocomplete="username" required placeholder="3–32 characters">
+        <label>Email</label>
+        <input id="regEmail" type="email" autocomplete="email" required placeholder="you@example.com">
+        <label>Password</label>
+        <input id="regPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters">
+        <label>Confirm Password</label>
+        <input id="regConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="Repeat password">
+        <label>Referral Code</label>
+        <input id="regReferral" required placeholder="Enter referral code">
+        <button class="primary" type="submit">Create Account</button>
+        <button class="link-btn" type="button" onclick="showAuth('login')">Already have an account? Sign in</button>
+      </form>
+
+      <div class="auth-note">Registration requires a valid referral code.</div>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="brand">
+        <div class="brand-small">🔐</div>
+        <div><b>Data Security</b><span>Secure Storage</span></div>
+      </div>
+
+      <nav>
+        <button class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">⌂ <span>Dashboard</span></button>
+        <button class="nav-item" data-page="files" onclick="navigate('files')">▣ <span>My Files</span></button>
+        <button class="nav-item" data-page="upload" onclick="navigate('upload')">↑ <span>Upload File</span></button>
+        <button class="nav-item" data-page="clients" onclick="navigate('clients')">♙ <span>Clients</span></button>
+        <button class="nav-item" data-page="shared" onclick="navigate('shared')">↗ <span>Shared Files</span></button>
+        <button class="nav-item" data-page="trash" onclick="navigate('trash')">♲ <span>Trash</span></button>
+        <button class="nav-item" data-page="activity" onclick="navigate('activity')">◷ <span>Activity</span></button>
+        <div class="nav-line"></div>
+        <button class="nav-item" data-page="settings" onclick="navigate('settings')">⚙ <span>Settings</span></button>
+        <button id="adminNav" class="nav-item hidden" data-page="admin" onclick="navigate('admin')">♛ <span>Admin Panel</span></button>
+      </nav>
+
+      <button class="logout" onclick="logout()">⇥ <span>Logout</span></button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="top-left">
+          <button class="mobile-menu" onclick="toggleSidebar()">☰</button>
+          <div>
+            <h2 id="pageTitle">Dashboard</h2>
+            <small id="pageSubtitle">Your private storage</small>
+          </div>
+        </div>
+        <div class="user-chip">
+          <div>
+            <b id="topUsername">User</b>
+            <small id="topRole">User</small>
+          </div>
+          <div class="avatar" id="topAvatar">U</div>
+        </div>
+      </header>
+
+      <div class="content">
+        <section id="page-dashboard" class="page"></section>
+        <section id="page-files" class="page hidden"></section>
+        <section id="page-upload" class="page hidden"></section>
+        <section id="page-clients" class="page hidden"></section>
+        <section id="page-shared" class="page hidden"></section>
+        <section id="page-trash" class="page hidden"></section>
+        <section id="page-activity" class="page hidden"></section>
+        <section id="page-settings" class="page hidden"></section>
+        <section id="page-admin" class="page hidden"></section>
+      </div>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeModal()">×</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
